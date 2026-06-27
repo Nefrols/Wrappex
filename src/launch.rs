@@ -14,8 +14,16 @@ pub enum LaunchError {
     },
 }
 
-pub fn build_codex_args(profile: &Profile, model: &str, passthrough: &[String]) -> Vec<String> {
-    let mut args = vec!["--model".to_string(), model.to_string()];
+pub fn build_codex_args(
+    profile: &Profile,
+    model: Option<&str>,
+    passthrough: &[String],
+) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(model) = model {
+        args.push("--model".to_string());
+        args.push(model.to_string());
+    }
     push_override(&mut args, format!("model_provider={}", profile.id));
     push_override(
         &mut args,
@@ -76,6 +84,15 @@ pub fn build_codex_args(profile: &Profile, model: &str, passthrough: &[String]) 
                 "model_providers.{}.env_key={}",
                 profile.id,
                 toml_string(env_key)
+            ),
+        );
+    }
+    if let Some(path) = profile.model_catalog_json.as_deref() {
+        push_override(
+            &mut args,
+            format!(
+                "model_catalog_json={}",
+                toml_string(&path.display().to_string())
             ),
         );
     }
@@ -161,6 +178,9 @@ mod tests {
             requires_openai_auth: false,
             supports_websockets: false,
             default_model: Some("qwen".to_string()),
+            model_catalog_json: Some(PathBuf::from(
+                "C:/Users/Aristo/.wrappex/model-catalogs/unsloth-local.json",
+            )),
             env_key: Some("UNSLOTH_API_KEY".to_string()),
             request_max_retries: 0,
             stream_max_retries: 0,
@@ -171,7 +191,7 @@ mod tests {
     fn builds_codex_args_with_provider_overrides() {
         let args = build_codex_args(
             &profile(),
-            "qwen",
+            Some("qwen"),
             &["--sandbox".into(), "workspace-write".into()],
         );
         assert_eq!(args[0], "--model");
@@ -183,7 +203,19 @@ mod tests {
         assert!(
             args.contains(&"model_providers.unsloth-local.env_key=\"UNSLOTH_API_KEY\"".to_string())
         );
+        assert!(args.contains(
+            &"model_catalog_json=\"C:/Users/Aristo/.wrappex/model-catalogs/unsloth-local.json\""
+                .to_string()
+        ));
         assert!(args.ends_with(&["--sandbox".to_string(), "workspace-write".to_string()]));
+    }
+
+    #[test]
+    fn omits_model_arg_when_model_is_not_selected() {
+        let args = build_codex_args(&profile(), None, &[]);
+
+        assert!(!args.contains(&"--model".to_string()));
+        assert!(args.contains(&"model_provider=unsloth-local".to_string()));
     }
 
     #[test]

@@ -1,4 +1,3 @@
-use crate::models::fetch_model_ids;
 use crate::profile::{derive_profile_id, validate_profile_id, Profile, ProfileStore};
 use anyhow::{anyhow, Result};
 use inquire::{Confirm, Select, Text};
@@ -72,7 +71,7 @@ pub fn prompt_new_profile() -> Result<Profile> {
     } else {
         None
     };
-    let mut profile = Profile {
+    let profile = Profile {
         id,
         name,
         base_url,
@@ -80,44 +79,12 @@ pub fn prompt_new_profile() -> Result<Profile> {
         requires_openai_auth,
         supports_websockets: false,
         default_model: None,
+        model_catalog_json: None,
         env_key,
         request_max_retries: 0,
         stream_max_retries: 0,
     };
-    profile.default_model = prompt_model_for_profile(&profile)?;
     Ok(profile)
-}
-
-pub fn select_model(profile: &Profile) -> Result<String> {
-    if let Some(model) = prompt_model_for_profile(profile)? {
-        return Ok(model);
-    }
-    if let Some(model) = profile.default_model.clone() {
-        return Ok(model);
-    }
-    Text::new("Model").prompt().map_err(Into::into)
-}
-
-fn prompt_model_for_profile(profile: &Profile) -> Result<Option<String>> {
-    match fetch_model_ids(profile) {
-        Ok(models) if !models.is_empty() => {
-            let initial = profile
-                .default_model
-                .as_ref()
-                .and_then(|default| models.iter().position(|model| model == default))
-                .unwrap_or(0);
-            Select::new("Choose model", models)
-                .with_starting_cursor(initial)
-                .prompt()
-                .map(Some)
-                .map_err(Into::into)
-        }
-        Ok(_) => Ok(None),
-        Err(error) => {
-            eprintln!("wrappex: could not fetch models: {error}");
-            Ok(None)
-        }
-    }
 }
 
 pub fn warn_missing_env_key(profile: &Profile) -> Result<()> {

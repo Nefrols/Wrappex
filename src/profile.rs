@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -60,6 +60,8 @@ pub struct Profile {
     pub supports_websockets: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_catalog_json: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_key: Option<String>,
     #[serde(default)]
@@ -187,6 +189,7 @@ wire_api = "responses"
 requires_openai_auth = false
 supports_websockets = false
 default_model = "qwen"
+model_catalog_json = "C:\\Users\\Aristo\\.wrappex\\model-catalogs\\unsloth-local.json"
 request_max_retries = 0
 stream_max_retries = 0
 "#;
@@ -195,5 +198,14 @@ stream_max_retries = 0
         assert_eq!(store.version, 1);
         assert_eq!(store.profiles[0].id, "unsloth-local");
         assert_eq!(store.profiles[0].default_model.as_deref(), Some("qwen"));
+        assert_eq!(
+            store.profiles[0]
+                .model_catalog_json
+                .as_deref()
+                .map(Path::display)
+                .map(|path| path.to_string())
+                .as_deref(),
+            Some("C:\\Users\\Aristo\\.wrappex\\model-catalogs\\unsloth-local.json")
+        );
     }
 }

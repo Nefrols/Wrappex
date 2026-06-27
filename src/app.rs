@@ -5,8 +5,12 @@ use clap::Parser;
 use std::path::PathBuf;
 
 pub fn default_profiles_path() -> Result<PathBuf> {
+    Ok(default_wrappex_dir()?.join("profiles.toml"))
+}
+
+pub fn default_wrappex_dir() -> Result<PathBuf> {
     let home = env_home_dir().ok_or_else(|| anyhow!("could not determine home directory"))?;
-    Ok(home.join(".wrappex").join("profiles.toml"))
+    Ok(home.join(".wrappex"))
 }
 
 fn env_home_dir() -> Option<PathBuf> {
@@ -28,7 +32,8 @@ pub fn find_profile<'a>(store: &'a ProfileStore, query: &str) -> Option<&'a Prof
 
 pub fn run_from_env() -> Result<()> {
     let cli = Cli::parse();
-    let profiles_path = default_profiles_path()?;
+    let wrappex_dir = default_wrappex_dir()?;
+    let profiles_path = wrappex_dir.join("profiles.toml");
     let mut store = load_profiles(&profiles_path)?;
 
     match cli.command {
@@ -38,7 +43,8 @@ pub fn run_from_env() -> Result<()> {
                 Ok(())
             }
             ProfileCommand::Create => {
-                let profile = crate::ui::prompt_new_profile()?;
+                let mut profile = crate::ui::prompt_new_profile()?;
+                refresh_catalog_or_warn(&mut profile, &wrappex_dir);
                 store.profiles.push(profile);
                 save_profiles(&profiles_path, &store)?;
                 Ok(())
@@ -50,16 +56,46 @@ pub fn run_from_env() -> Result<()> {
             }
         },
         Some(CliCommand::Run(args)) => {
-            let profile = find_profile(&store, &args.profile)
+            let mut profile = find_profile(&store, &args.profile)
                 .ok_or_else(|| anyhow!("profile '{}' not found", args.profile))?
                 .clone();
+            refresh_catalog_or_warn(&mut profile, &wrappex_dir);
+            upsert_profile(&mut store, profile.clone());
+            save_profiles(&profiles_path, &store)?;
             run_profile(cli.codex_bin, profile, args.codex_args)
         }
         None => {
-            let profile = crate::ui::select_or_create_profile(&mut store)?;
+            let mut profile = crate::ui::select_or_create_profile(&mut store)?;
+            refresh_catalog_or_warn(&mut profile, &wrappex_dir);
+            upsert_profile(&mut store, profile.clone());
             save_profiles(&profiles_path, &store)?;
             run_profile(cli.codex_bin, profile, Vec::new())
         }
+    }
+}
+
+fn refresh_catalog_or_warn(profile: &mut Profile, wrappex_dir: &std::path::Path) {
+    if let Err(error) = crate::models::refresh_profile_model_catalog(profile, wrappex_dir) {
+        eprintln!("wrappex: could not refresh model metadata: {error}");
+        if profile
+            .model_catalog_json
+            .as_ref()
+            .is_some_and(|path| !path.exists())
+        {
+            profile.model_catalog_json = None;
+        }
+    }
+}
+
+fn upsert_profile(store: &mut ProfileStore, profile: Profile) {
+    if let Some(existing) = store
+        .profiles
+        .iter_mut()
+        .find(|existing| existing.id == profile.id)
+    {
+        *existing = profile;
+    } else {
+        store.profiles.push(profile);
     }
 }
 
@@ -69,9 +105,9 @@ fn run_profile(
     passthrough: Vec<String>,
 ) -> Result<()> {
     crate::ui::warn_missing_env_key(&profile)?;
-    let model = crate::ui::select_model(&profile)?;
     let codex_bin = crate::launch::resolve_codex_bin_from_env(codex_bin)?;
-    let args = crate::launch::build_codex_args(&profile, &model, &passthrough);
+    let args =
+        crate::launch::build_codex_args(&profile, profile.default_model.as_deref(), &passthrough);
     let code = crate::launch::run_codex(&codex_bin, &args)?;
     std::process::exit(code);
 }
@@ -93,6 +129,7 @@ mod tests {
                 requires_openai_auth: false,
                 supports_websockets: false,
                 default_model: Some("qwen".into()),
+                model_catalog_json: None,
                 env_key: None,
                 request_max_retries: 0,
                 stream_max_retries: 0,
